@@ -25,16 +25,16 @@ from cosyvoice.cli.cosyvoice import CosyVoice
 from cosyvoice.utils.file_utils import load_wav
 from utils.rich_format_small import format_str_v2
 
-vosk_model_path = "./models/voskModel"
+# vosk_model_path = "./models/voskModel"
 
-# 检查模型路径是否存在
-if not os.path.exists(vosk_model_path):
-    print(
-        f"Please download the model from https://alphacephei.com/vosk/models and unpack as {vosk_model_path} in the current folder."
-    )
-    sys.exit(1)
+# # 检查模型路径是否存在
+# if not os.path.exists(vosk_model_path):
+#     print(
+#         f"Please download the model from https://alphacephei.com/vosk/models and unpack as {vosk_model_path} in the current folder."
+#     )
+#     sys.exit(1)
 
-    # 加载 Vosk 模型
+# 加载 Vosk 模型
 vosk_model = vosk.Model(vosk_model_path)
 recognizer = vosk.KaldiRecognizer(vosk_model, 16000)
 
@@ -318,7 +318,7 @@ def main_loop():
     history = None
     while True:
         print("正在监听触发词...1")
-        audio_data = listen_for_trigger("小麦小麦")
+        audio_data = listen_for_trigger_vosk("小麦小麦")
         if audio_data is not None:
             # print(f"audio_data: {audio_data}")
             for result in model_chat(audio_data, history):
@@ -363,34 +363,26 @@ def play_audio(audio_data):
 #                     yield history, output_audio
 
 
-def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
-    p = pyaudio.PyAudio()
-    stream = p.open(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=sample_rate,
-        input=True,
-        frames_per_buffer=chunk_size,
-    )
+def listen_for_trigger_vosk(audio_data, trigger_word, sample_rate=16000):
 
     print("正在监听触发词...")
 
-    while True:
-        data = stream.read(chunk_size)
-        if recognizer.AcceptWaveform(data):
-            result = recognizer.Result()
-            text = json.loads(result)["text"]
-            print(f"识别出的文本: {text}")
-            if trigger_word in text:
-                print(f"检测到触发词: {trigger_word}")
-                return start_recording(stream, sample_rate, chunk_size)
-        else:
-            partial_result = recognizer.PartialResult()
-            partial_text = json.loads(partial_result)["partial"]
-            print(f"部分识别出的文本: {partial_text}")
-            if trigger_word in partial_text:
-                print(f"检测到部分触发词: {trigger_word}")
-                return start_recording(stream, sample_rate, chunk_size)
+    if recognizer.AcceptWaveform(audio_data):
+        result = recognizer.Result()
+        text = json.loads(result)["text"]
+        print(f"识别出的文本: {text}")
+        if trigger_word in text:
+            print(f"检测到触发词: {trigger_word}")
+            return text
+    else:
+        partial_result = recognizer.PartialResult()
+        partial_text = json.loads(partial_result)["partial"]
+        print(f"部分识别出的文本: {partial_text}")
+        if trigger_word in partial_text:
+            print(f"检测到部分触发词: {trigger_word}")
+            return partial_text
+
+    return ""
 
 
 if __name__ == "__main__":
