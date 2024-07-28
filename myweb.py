@@ -1,7 +1,10 @@
 import json
+import logging
 import os
+import queue
 import re
 import sys
+import threading
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -34,6 +37,18 @@ from utils.rich_format_small import format_str_v2
 #     sys.exit(1)
 
 # 加载 Vosk 模型
+
+# 设置文件日志
+logging.basicConfig(
+    filename="assistant.log", level=logging.INFO, format="%(asctime)s - %(message)s"
+)
+
+
+# 创建一个队列来存储日志消息
+log_queue = queue.Queue()
+audio_queue = queue.Queue()
+stop_flag = threading.Event()
+
 vosk_model_path = "./models/voskModel"
 vosk_model = vosk.Model(vosk_model_path)
 recognizer = vosk.KaldiRecognizer(vosk_model, 16000)
@@ -160,7 +175,7 @@ def text_to_speech(text):
         yield (22050, output["tts_speech"].numpy().flatten())
 
 
-def listen_for_trigger(trigger_word, sample_rate=16000, chunk_size=1024):
+def listen_for_trigger(trigger_word, sample_rate=16000, chunk_size=512):
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
@@ -207,7 +222,7 @@ def detect_trigger_word(audio_data, trigger_word, sample_rate):
     return trigger_word.lower() in text.lower()
 
 
-def start_recording(stream, sample_rate=16000, chunk_size=1024):
+def start_recording(stream, sample_rate=16000, chunk_size=512):
 
     # if stream is None:
     #     p = pyaudio.PyAudio()
@@ -308,23 +323,6 @@ def model_chat(
     print("turn end")
 
 
-# with gr.Blocks() as demo:
-#     gr.Markdown("""<center><font size=8>FunAudioLLM——Voice Chat👾</center>""")
-
-#     chatbot = gr.Chatbot(label="FunAudioLLM")
-#     with gr.Row():
-#         audio_input = gr.Audio(sources="microphone", label="Audio Input")
-#         audio_output = gr.Audio(label="Audio Output", autoplay=True, streaming=True)
-#         clear_button = gr.Button("Clear")
-
-#     audio_input.stop_recording(
-#         model_chat,
-#         inputs=[audio_input, chatbot],
-#         outputs=[chatbot, audio_output, audio_input],
-#     )
-#     clear_button.click(clear_session, outputs=[chatbot, audio_output, audio_input])
-
-
 def main_loop():
     history = None
     conversation = False
@@ -400,7 +398,7 @@ def play_audio(audio_data):
 #                     yield history, output_audio
 
 
-def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
+def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=512):
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
@@ -440,6 +438,150 @@ def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
                 return start_recording(stream, sample_rate, chunk_size)
 
 
+# 修改 listen_for_trigger_vosk 函数以接受音频数据
+def listen_for_trigger_vosk1(
+    trigger_word, sample_rate=16000, chunk_size=512, audio_data=None
+):
+    if audio_data is None:
+        # 原有的麦克风输入逻辑
+        p = pyaudio.PyAudio()
+        stream = p.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=sample_rate,
+            input=True,
+            frames_per_buffer=chunk_size,
+        )
+    else:
+        # 使用传入的音频数据
+        audio_data = np.frombuffer(audio_data, dtype=np.int16)
+
+    recognizer = vosk.KaldiRecognizer(vosk_model, sample_rate)
+
+    if audio_data is None:
+        # 原有的流式处理逻辑
+        while True:
+            data = stream.read(chunk_size)
+            if recognizer.AcceptWaveform(data):
+                result = recognizer.Result()
+                text = json.loads(result)["text"]
+                if trigger_word in text:
+                    print(f"检测到触发词: {trigger_word}")
+                    for audio_data in text_to_speech("小军到!"):
+                        play_audio(audio_data)
+                    return start_recording(stream, sample_rate, chunk_size)
+    else:
+        # 处理传入的音频数据
+        if recognizer.AcceptWaveform(audio_data.tobytes()):
+            result = recognizer.Result()
+            text = json.loads(result)["text"]
+            if trigger_word in text:
+                print(f"检测到触发词: {trigger_word}")
+                for audio_data in text_to_speech("小军到!"):
+                    play_audio(audio_data)
+                return audio_data  # 返回原始音频数据作为录音结果
+
+    return None
+
+
+def run_main_loop():
+    global stop_flag
+    history = None
+    conversation = False
+
+    while not stop_flag.is_set():
+        if conversation:
+            print("开始对话...")
+            p = pyaudio.PyAudio()
+            stream = p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=512,
+            )
+            audio = start_recording(stream, 16000, 512)
+            if audio is not None:
+                for result in model_chat(audio, history):
+                    history, output_audio, _ = result
+                    if output_audio is not None:
+                        play_audio(output_audio)
+                print("对话结束")
+            else:
+                print("录音为空，结束对话")
+                for audio_data in text_to_speech("我先走啦，有事再叫我哦"):
+                    play_audio(audio_data)
+                conversation = False
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        else:
+            print("正在监听触发词...")
+            try:
+                audio_data = audio_queue.get(timeout=1)  # 1秒超时
+                if audio_data is not None:
+                    detected_audio = listen_for_trigger_vosk(
+                        "小军", audio_data=audio_data
+                    )
+                    if detected_audio is not None:
+                        for result in model_chat(detected_audio, None):
+                            history, output_audio, _ = result
+                            if output_audio is not None:
+                                play_audio(output_audio)
+                                conversation = True
+                        print("触发词检测到，开始对话")
+            except queue.Empty:
+                pass  # 队列为空，继续循环
+
+    print("主循环已停止")
+
+
+def start_main_loop():
+    global stop_flag
+    stop_flag.clear()
+    threading.Thread(target=run_main_loop, daemon=True).start()
+    return "主循环已启动"
+
+
+def stop_main_loop():
+    global stop_flag
+    stop_flag.set()
+    return "已发送停止信号给主循环"
+
+
+def process_audio(audio):
+    if audio is not None:
+        audio_queue.put(audio[1])  # audio[1] 是音频数据
+    return "音频已接收"
+
+
+def update_log():
+    logs = []
+    while not log_queue.empty():
+        logs.append(log_queue.get())
+    return "\n".join(logs)
+
+
+with gr.Blocks() as demo:
+    gr.Markdown("## 语音助手控制面板")
+
+    with gr.Row():
+        start_button = gr.Button("启动主循环")
+        stop_button = gr.Button("停止主循环")
+
+    status_text = gr.Textbox(label="状态", interactive=False)
+    log_output = gr.Textbox(label="日志", interactive=False)
+
+    # 添加麦克风输入组件
+    audio_input = gr.Audio(sources="microphone", label="Audio Input")
+
+    start_button.click(start_main_loop, outputs=status_text)
+    stop_button.click(stop_main_loop, outputs=status_text)
+
+    # 当接收到音频时处理
+    audio_input.stream(process_audio, outputs=status_text)
+
+    # 定期更新日志
+    demo.load(update_log, outputs=log_output, every=1)
 if __name__ == "__main__":
-    main_loop()
-    # demo.launch(server_name="0.0.0.0", server_port=60002, inbrowser=True, share=True)
+    demo.launch()
