@@ -51,6 +51,8 @@ sense_voice_model = AutoModel(
 )
 
 model_name = "llama3.1"  # 使用Ollama中可用的模型名称
+ollama.api_base_url = "http://localhost:11434"
+
 default_system = """
 你是小夏，一位典型的南方女孩。你出生于福建长乐，声音有亲近感，会用简洁语言表达你的想法。你是用户的好朋友。你的回答将通过逼真的文字转语音技术读出。
 
@@ -205,13 +207,27 @@ def detect_trigger_word(audio_data, trigger_word, sample_rate):
     return trigger_word.lower() in text.lower()
 
 
-def start_recording(stream, sample_rate, chunk_size):
+def start_recording(stream, sample_rate=16000, chunk_size=1024):
+
+    # if stream is None:
+    #     p = pyaudio.PyAudio()
+    #     stream = p.open(
+    #         format=pyaudio.paInt16,
+    #         channels=1,
+    #         rate=sample_rate,
+    #         input=True,
+    #         frames_per_buffer=chunk_size,
+    #     )
+
     print("开始录音...")
     frames = []
     silence_threshold = 500  # 静音阈值，需要根据实际情况调整
     silence_count = 0
     max_silence_count = int(3 * sample_rate / chunk_size)  # 3秒静音
     has_sound = False  # 标志位，检测是否有声音
+
+    # Clear the stream buffer before starting recording
+    stream.read(stream.get_read_available())
 
     while True:
         data = np.frombuffer(stream.read(chunk_size), dtype=np.int16)
@@ -228,6 +244,7 @@ def start_recording(stream, sample_rate, chunk_size):
             break
 
     if has_sound:
+        print("录音结束")
         return np.concatenate(frames)
     else:
         print("全程录音都是静音，不执行")
@@ -310,20 +327,44 @@ def model_chat(
 
 def main_loop():
     history = None
+    conversation = True
     while True:
-        print("正在监听触发词...1")
-        audio_data = listen_for_trigger_vosk("小军")
-        # audio_data = listen_for_trigger("小麦")
-        if audio_data is not None:
-            # print(f"audio_data: {audio_data}")
-            for result in model_chat(audio_data, history):
-                # print(" result:", result)
-                history, output_audio, _ = result
-                # print("debug result:", history)
-                # print("debug output_audio:", output_audio)
-                if output_audio is not None:
-                    play_audio(output_audio)
-            print("对话结束")
+        if conversation:
+            p = pyaudio.PyAudio()
+            stream = p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=1024,
+            )
+            audio = start_recording(stream, 16000, 1024)
+            if audio is not None:
+                for result in model_chat(audio, history):
+                    history, output_audio, _ = result
+                    if output_audio is not None:
+                        play_audio(output_audio)
+                print("对话结束")
+            else:
+                print("录音为空，结束对话")
+                for audio_data in text_to_speech("我先走啦，有事再叫我哦"):
+                    play_audio(audio_data)
+                conversation = False
+        else:
+            print("正在监听触发词...1")
+            audio_data = listen_for_trigger("小军")
+            # audio_data = listen_for_trigger("小麦")
+            if audio_data is not None:
+                # print(f"audio_data: {audio_data}")
+                for result in model_chat(audio_data, history):
+                    # print(" result:", result)
+                    history, output_audio, _ = result
+                    # print("debug result:", history)
+                    # print("debug output_audio:", output_audio)
+                    if output_audio is not None:
+                        play_audio(output_audio)
+                        conversation = True
+                print("对话结束")
 
 
 def play_audio(audio_data):
@@ -370,6 +411,9 @@ def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
     )
 
     print("正在监听触发词...")
+
+    # Clear the stream buffer before starting the loop
+    stream.read(stream.get_read_available())
 
     while True:
         data = stream.read(chunk_size)

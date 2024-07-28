@@ -199,7 +199,7 @@ def text_to_speech(text):
 
 # 添加Gradio界面定义
 with gr.Blocks() as demo:
-    gr.Markdown("""<center><font size=8>FunAudioLLM——Voice Chat👾</center>""")
+    gr.Markdown("""<center><font size=8>测试版0.01</center>""")
 
     chatbot = gr.Chatbot(label="FunAudioLLM")
     with gr.Row():
