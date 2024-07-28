@@ -253,7 +253,7 @@ def start_recording(stream, sample_rate=16000, chunk_size=1024):
 
 # 修改 model_chat 函数
 def model_chat(
-    audio_data: np.ndarray, history: Optional[History]
+    audio_data: np.ndarray, history: Optional[History], clean_history: bool = False
 ) -> Tuple[str, str, History]:
     if audio_data is None:
         query = ""
@@ -327,7 +327,7 @@ def model_chat(
 
 def main_loop():
     history = None
-    conversation = True
+    conversation = False
     while True:
         if conversation:
             p = pyaudio.PyAudio()
@@ -352,11 +352,12 @@ def main_loop():
                 conversation = False
         else:
             print("正在监听触发词...1")
-            audio_data = listen_for_trigger("小军")
+            # 清空记录
+            audio_data = listen_for_trigger_vosk("小军")
             # audio_data = listen_for_trigger("小麦")
             if audio_data is not None:
                 # print(f"audio_data: {audio_data}")
-                for result in model_chat(audio_data, history):
+                for result in model_chat(audio_data, None):
                     # print(" result:", result)
                     history, output_audio, _ = result
                     # print("debug result:", history)
@@ -400,7 +401,6 @@ def play_audio(audio_data):
 
 
 def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
-
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
@@ -411,7 +411,7 @@ def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
     )
 
     print("正在监听触发词...")
-
+    recognizer = vosk.KaldiRecognizer(vosk_model, sample_rate)  # 重新初始化 recognizer
     # Clear the stream buffer before starting the loop
     stream.read(stream.get_read_available())
 
