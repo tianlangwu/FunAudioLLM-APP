@@ -160,7 +160,7 @@ def text_to_speech(text):
         yield (22050, output["tts_speech"].numpy().flatten())
 
 
-def listen_for_trigger(trigger_word, sample_rate=16000, chunk_size=1024):
+def listen_for_trigger(trigger_word, sample_rate=16000, chunk_size=512):
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
@@ -207,7 +207,7 @@ def detect_trigger_word(audio_data, trigger_word, sample_rate):
     return trigger_word.lower() in text.lower()
 
 
-def start_recording(stream, sample_rate=16000, chunk_size=1024):
+def start_recording(stream, sample_rate=16000, chunk_size=512):
 
     # if stream is None:
     #     p = pyaudio.PyAudio()
@@ -219,7 +219,6 @@ def start_recording(stream, sample_rate=16000, chunk_size=1024):
     #         frames_per_buffer=chunk_size,
     #     )
 
-    print("开始录音...")
     frames = []
     silence_threshold = 500  # 静音阈值，需要根据实际情况调整
     silence_count = 0
@@ -232,6 +231,7 @@ def start_recording(stream, sample_rate=16000, chunk_size=1024):
     while True:
         data = np.frombuffer(stream.read(chunk_size), dtype=np.int16)
         frames.append(data)
+        print("开始录音...")
 
         if np.abs(data).mean() < silence_threshold:
             silence_count += 1
@@ -336,9 +336,9 @@ def main_loop():
                 channels=1,
                 rate=16000,
                 input=True,
-                frames_per_buffer=1024,
+                frames_per_buffer=512,
             )
-            audio = start_recording(stream, 16000, 1024)
+            audio = start_recording(stream, 16000, 512)
             if audio is not None:
                 for result in model_chat(audio, history):
                     history, output_audio, _ = result
@@ -400,7 +400,7 @@ def play_audio(audio_data):
 #                     yield history, output_audio
 
 
-def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=1024):
+def listen_for_trigger_vosk(trigger_word, sample_rate=16000, chunk_size=512):
     p = pyaudio.PyAudio()
     stream = p.open(
         format=pyaudio.paInt16,
